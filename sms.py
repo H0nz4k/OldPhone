@@ -24,10 +24,13 @@ def main():
 
     if "+CMGS" in resp:
         print("SMS odeslána úspěšně.")
-    elif "+CMS ERROR" in resp or ("ERROR" in resp and "+CMGS" not in resp):
+    elif "ERROR" in resp:
         print("Modul vrátil chybu (viz odpověď výše).")
+    elif r:
+        # Modem odpověděl něčím (OK / prompt), ale bez +CMGS — pravděpodobně odesláno
+        print("SMS pravděpodobně odeslána (chybí +CMGS potvrzení, ale žádná chyba).")
     else:
-        print("Chyba při odesílání SMS.")
+        print("Žádná odpověď od modemu — zkontroluj signál a port.")
 
     gsm.close()
 

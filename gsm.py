@@ -152,12 +152,33 @@ class GSM:
         return self._send("ATA")
 
     def send_sms(self, number, text):
-        self._send("AT+CMGF=1")  # textový režim
+        self._send("AT+CMGF=1")       # textový režim
+        self._send('AT+CSCS="UCS2"')  # UCS2 pro plnou podporu diakritiky
+
+        # Číslo zůstává v ASCII; text kódujeme jako UCS2 hex
+        ucs2_text = text.encode("utf-16-be").hex().upper()
+
         self.ser.reset_input_buffer()
         self.ser.write(f'AT+CMGS="{number}"\r\n'.encode())
-        time.sleep(0.5)
-        self.ser.write((text + chr(26)).encode())  # Ctrl+Z = odeslat
-        lines = self.read_lines(timeout=15)
+
+        # Čekáme na výzvu '>' od modemu
+        deadline = time.time() + 5
+        prompt_ok = False
+        buf = ""
+        while time.time() < deadline:
+            if self.ser.in_waiting:
+                buf += self.ser.read(self.ser.in_waiting).decode(errors="ignore")
+                if ">" in buf:
+                    prompt_ok = True
+                    break
+            time.sleep(0.05)
+
+        if not prompt_ok:
+            return "ERROR: no prompt from modem"
+
+        # Odešleme UCS2 text + Ctrl+Z
+        self.ser.write((ucs2_text + chr(26)).encode())
+        lines = self.read_lines(timeout=20)
         return "\n".join(lines) if lines else ""
 
     def enable_clip(self):
