@@ -1,0 +1,11 @@
+gsm:
+  port: /dev/ttyS0
+  baud: 9600
+  timeout: 1
+
+call:
+  number: "731164187"
+
+sms:
+  number: "731164187"
+  reject_message: "Omlouvám se, nemohu právě teď mluvit. Zavolám zpět."
