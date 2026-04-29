@@ -181,12 +181,50 @@ class GSM:
         lines = self.read_lines(timeout=20)
         return "\n".join(lines) if lines else ""
 
+    # GSM-7 default alphabet table (3GPP TS 23.038)
+    _GSM7 = (
+        "@£$¥èéùìòÇ\nØø\rÅå"
+        "ΔΦΓΛΩΠΨΣΘΞÆæßÉ"
+        " !\"#¤%&'()*+,-./"
+        "0123456789:;<=>?"
+        "¡ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+        "ÄÖÑÜ§¿abcdefghijklmnopqrstuvwxyz"
+        "äöñüà"
+    )
+    # Correct full 128-char GSM7 table
+    _GSM7_TABLE = (
+        "@£$¥èéùìòÇ\nØø\rÅå"
+        "\u0394_\u03a6\u0393\u039b\u03a9\u03a0\u03a8\u03a3\u0398\u039e\x1b\u00c6\u00e6\u00df\u00c9"
+        " !\"#\u00a4%&'()*+,-./"
+        "0123456789:;<=>?"
+        "\u00a1ABCDEFGHIJKLMNOPQRSTUVWXYZ\u00c4\u00d6\u00d1\u00dc\u00a7"
+        "\u00bfabcdefghijklmnopqrstuvwxyz\u00e4\u00f6\u00f1\u00fc\u00e0"
+    )
+
+    @staticmethod
+    def _decode_gsm7(data):
+        """Dekóduje GSM-7 bit-packed bajty na řetězec."""
+        table = GSM._GSM7_TABLE
+        buf, bits, chars = 0, 0, []
+        for byte in data:
+            buf |= byte << bits
+            bits += 8
+            while bits >= 7:
+                idx = buf & 0x7F
+                buf >>= 7
+                bits -= 7
+                if idx < len(table):
+                    chars.append(table[idx])
+                else:
+                    chars.append("?")
+        return "".join(chars).strip()
+
     def ussd(self, code, timeout=30):
         """
         Odešle USSD kód (např. '*101#') a vrátí odpověď operátora.
 
-        Modem posílá +CUSD odpověď v UCS2 binárním formátu (raw bajty).
-        Hledáme b"+CUSD" v surovém bufferu a obsah parsujeme jako UCS2-BE.
+        SIM868 neodesílá +CUSD: prefix — po OK posílá rovnou raw data.
+        Data jsou GSM-7 bit-packed (85 bajtů → ~97 znaků).
         """
         self._send('AT+CSCS="IRA"')
         time.sleep(0.3)
@@ -197,6 +235,7 @@ class GSM:
         while time.time() < deadline:
             if self.ser.in_waiting:
                 buf += self.ser.read(self.ser.in_waiting)
+            # Standardní +CUSD formát
             if b"+CUSD" in buf:
                 return self._parse_cusd_bytes(buf)
             # Chyby modem posílá v ASCII
@@ -204,7 +243,42 @@ class GSM:
             for err in ("+CME ERROR", "+CMS ERROR"):
                 if err in ascii_view:
                     return "CHYBA modemu: " + ascii_view.strip()
+            # SIM868 quirk: pošle OK + raw GSM-7 data bez +CUSD prefixu
+            ok_idx = buf.find(b"\r\nOK\r\n")
+            if ok_idx != -1:
+                after_ok = buf[ok_idx + 6:]
+                # Počkáme na konec přenosu (0.5 s ticho)
+                if after_ok and time.time() > deadline - 25:
+                    break
+                if len(after_ok) > 10 and time.time() - (deadline - timeout) > 4:
+                    break
             time.sleep(0.1)
+
+        # Zkusíme standardní CUSD parsování
+        if b"+CUSD" in buf:
+            return self._parse_cusd_bytes(buf)
+
+        # Quirk mode: extrahujeme data za OK a dekódujeme jako GSM-7
+        ok_idx = buf.find(b"\r\nOK\r\n")
+        if ok_idx != -1:
+            raw_data = buf[ok_idx + 6:]
+            if raw_data:
+                # Zkusíme GSM-7
+                try:
+                    result = GSM._decode_gsm7(raw_data).strip()
+                    if result and any(c.isalpha() for c in result):
+                        return result
+                except Exception:
+                    pass
+                # Zkusíme UCS2-BE (pokud sudý počet bajtů)
+                if len(raw_data) % 2 == 0:
+                    try:
+                        return raw_data.decode("utf-16-be").strip()
+                    except Exception:
+                        pass
+                # Fallback: latin-1
+                return raw_data.decode("latin-1", errors="replace").strip()
+
         return "(žádná odpověď od operátora — zkus jiný USSD kód)"
 
     @staticmethod
@@ -212,26 +286,16 @@ class GSM:
         """
         Najde +CUSD v surovém byte bufferu a dekóduje obsah.
         Formát: +CUSD: <n>,"<data>",<dcs>
-        Kde <data> může být:
-          - UCS2 binárně (raw 2-bajtové znaky)
-          - UCS2 hex (textová hex reprezentace)
-          - plain GSM/ASCII text
         """
         import re as _re
         idx = buf.find(b"+CUSD")
         if idx == -1:
             return buf.decode("utf-8", errors="replace").strip()
         chunk = buf[idx:]
-
-        # Najdeme první " v ASCII části (prefix je vždy ASCII)
         q_open = chunk.find(b'"')
         if q_open == -1:
             return chunk.decode("ascii", errors="replace").strip()
-
         content_raw = chunk[q_open + 1:]
-
-        # Najdeme uzavírací " + čárku + číslo DCS — hledáme zprava
-        # vzor: ",<čísla>\r nebo konec
         m = _re.search(rb'",\s*(\d+)', content_raw)
         if m:
             data_bytes = content_raw[:m.start()]
@@ -239,31 +303,25 @@ class GSM:
         else:
             data_bytes = content_raw
             dcs = 0
-
-        # Pokus o dekódování
-        # 1) UCS2-BE binárně (dcs=72 nebo lichá délka s nulovými bajty)
+        # DCS 72 = UCS2-BE binárně
         if dcs == 72 or (len(data_bytes) % 2 == 0 and b"\x00" in data_bytes):
             try:
                 return data_bytes.decode("utf-16-be")
             except Exception:
                 pass
-
-        # 2) UCS2 hex string (ASCII hex, délka dělitelná 4)
+        # UCS2 hex
         try:
             text = data_bytes.decode("ascii").strip().strip('"')
             if len(text) % 4 == 0 and all(c in "0123456789ABCDEFabcdef" for c in text):
                 return bytes.fromhex(text).decode("utf-16-be")
         except Exception:
             pass
-
-        # 3) Plain UTF-8 / latin-1
-        for enc in ("utf-8", "latin-1"):
-            try:
-                return data_bytes.decode(enc).strip().strip('"')
-            except Exception:
-                pass
-
-        return data_bytes.decode("ascii", errors="replace").strip()
+        # GSM-7 nebo plain text
+        try:
+            return GSM._decode_gsm7(data_bytes).strip()
+        except Exception:
+            pass
+        return data_bytes.decode("latin-1", errors="replace").strip()
 
     def enable_clip(self):
         """Zapne zobrazování čísla volajícího."""
