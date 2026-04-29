@@ -70,6 +70,15 @@ python3 sms.py
 python3 sms.py 777123456 "Ahoj, jsem to já!"
 ```
 
+### Zjistit stav kreditu (USSD)
+```bash
+python3 balance.py
+```
+Pro jiného operátora nebo jiný kód:
+```bash
+python3 balance.py "*102#"
+```
+
 ### Naslouchat příchozím hovorům
 ```bash
 python3 incoming.py
@@ -89,6 +98,7 @@ OldPhone/
 ├── call.py          # vytočení hovoru
 ├── sms.py           # odeslání SMS
 ├── incoming.py      # příchozí hovory
+├── balance.py       # stav kreditu přes USSD
 ├── postup.md        # dokumentace postupu vývoje
 └── README.md
 ```

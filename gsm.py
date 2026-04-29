@@ -181,6 +181,51 @@ class GSM:
         lines = self.read_lines(timeout=20)
         return "\n".join(lines) if lines else ""
 
+    def ussd(self, code, timeout=15):
+        """
+        Odešle USSD kód (např. '*101#') a vrátí odpověď operátora.
+        Odpověď přichází jako URC: +CUSD: 0,"<text>",<dcs>
+        """
+        self.ser.reset_input_buffer()
+        self.ser.write(f'AT+CUSD=1,"{code}",15\r\n'.encode())
+        buf = ""
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            if self.ser.in_waiting:
+                buf += self.ser.read(self.ser.in_waiting).decode(errors="ignore")
+            for line in buf.splitlines():
+                line = line.strip()
+                if line.startswith("+CUSD"):
+                    return self._parse_cusd(line)
+                if "ERROR" in line.upper():
+                    return "CHYBA: " + line
+            time.sleep(0.1)
+        return "(žádná odpověď od operátora)"
+
+    @staticmethod
+    def _parse_cusd(line):
+        """
+        Parsuje řádek +CUSD: <n>,"<msg>",<dcs>
+        DCS 72 = UCS2 hex, jinak plain text.
+        """
+        try:
+            # Ořežeme '+CUSD: ' prefix
+            rest = line[line.index(":") + 1:].strip()
+            parts = rest.split(",", 2)
+            if len(parts) < 2:
+                return rest
+            msg = parts[1].strip().strip('"')
+            dcs = int(parts[2].strip()) if len(parts) > 2 else 0
+            # DCS 72 = UCS2
+            if dcs == 72 or (len(msg) % 4 == 0 and all(c in "0123456789ABCDEFabcdef" for c in msg)):
+                try:
+                    return bytes.fromhex(msg).decode("utf-16-be")
+                except Exception:
+                    pass
+            return msg
+        except Exception:
+            return line
+
     def enable_clip(self):
         """Zapne zobrazování čísla volajícího."""
         return self._send("AT+CLIP=1")
