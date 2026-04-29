@@ -184,12 +184,12 @@ class GSM:
     def ussd(self, code, timeout=30):
         """
         Odešle USSD kód (např. '*101#') a vrátí odpověď operátora.
-        Odpověď přichází jako URC: +CUSD: 0,"<text>",<dcs>
 
-        Před dotazem přepne charset na IRA (plain ASCII), aby modem neposílal
-        USSD odpověď jako raw UCS2 binární bajty (důsledek AT+CSCS="UCS2" pro SMS).
+        Modem posílá +CUSD odpověď v UCS2 binárním formátu (raw bajty).
+        Hledáme b"+CUSD" v surovém bufferu a obsah parsujeme jako UCS2-BE.
         """
-        self._send('AT+CSCS="IRA"')   # reset charsetuf na plain ASCII pro USSD
+        self._send('AT+CSCS="IRA"')
+        time.sleep(0.3)
         self.ser.reset_input_buffer()
         self.ser.write(f'AT+CUSD=1,"{code}",15\r\n'.encode())
         buf = b""
@@ -197,49 +197,73 @@ class GSM:
         while time.time() < deadline:
             if self.ser.in_waiting:
                 buf += self.ser.read(self.ser.in_waiting)
-            # Prohledáme aktuální buffer po řádcích
-            for raw_line in buf.split(b"\r\n"):
-                try:
-                    s = raw_line.decode("utf-8", errors="replace").strip()
-                except Exception:
-                    s = raw_line.decode("latin-1", errors="replace").strip()
-                if s.startswith("+CUSD"):
-                    return self._parse_cusd(s)
-                if s.upper().startswith("+CME ERROR") or s.upper().startswith("+CMS ERROR"):
-                    return "CHYBA modemu: " + s
+            if b"+CUSD" in buf:
+                return self._parse_cusd_bytes(buf)
+            # Chyby modem posílá v ASCII
+            ascii_view = buf.decode("ascii", errors="ignore")
+            for err in ("+CME ERROR", "+CMS ERROR"):
+                if err in ascii_view:
+                    return "CHYBA modemu: " + ascii_view.strip()
             time.sleep(0.1)
-        # Vrátíme raw jako text pro ladění
-        try:
-            raw_str = buf.decode("utf-8", errors="replace").strip()
-        except Exception:
-            raw_str = repr(buf)
-        if raw_str:
-            return "(+CUSD nenalezeno, raw odpověď):\n" + raw_str
         return "(žádná odpověď od operátora — zkus jiný USSD kód)"
 
     @staticmethod
-    def _parse_cusd(line):
+    def _parse_cusd_bytes(buf):
         """
-        Parsuje řádek +CUSD: <n>,"<msg>",<dcs>
-        DCS 72 = UCS2 hex, jinak plain text.
+        Najde +CUSD v surovém byte bufferu a dekóduje obsah.
+        Formát: +CUSD: <n>,"<data>",<dcs>
+        Kde <data> může být:
+          - UCS2 binárně (raw 2-bajtové znaky)
+          - UCS2 hex (textová hex reprezentace)
+          - plain GSM/ASCII text
         """
+        import re as _re
+        idx = buf.find(b"+CUSD")
+        if idx == -1:
+            return buf.decode("utf-8", errors="replace").strip()
+        chunk = buf[idx:]
+
+        # Najdeme první " v ASCII části (prefix je vždy ASCII)
+        q_open = chunk.find(b'"')
+        if q_open == -1:
+            return chunk.decode("ascii", errors="replace").strip()
+
+        content_raw = chunk[q_open + 1:]
+
+        # Najdeme uzavírací " + čárku + číslo DCS — hledáme zprava
+        # vzor: ",<čísla>\r nebo konec
+        m = _re.search(rb'",\s*(\d+)', content_raw)
+        if m:
+            data_bytes = content_raw[:m.start()]
+            dcs = int(m.group(1))
+        else:
+            data_bytes = content_raw
+            dcs = 0
+
+        # Pokus o dekódování
+        # 1) UCS2-BE binárně (dcs=72 nebo lichá délka s nulovými bajty)
+        if dcs == 72 or (len(data_bytes) % 2 == 0 and b"\x00" in data_bytes):
+            try:
+                return data_bytes.decode("utf-16-be")
+            except Exception:
+                pass
+
+        # 2) UCS2 hex string (ASCII hex, délka dělitelná 4)
         try:
-            # Ořežeme '+CUSD: ' prefix
-            rest = line[line.index(":") + 1:].strip()
-            parts = rest.split(",", 2)
-            if len(parts) < 2:
-                return rest
-            msg = parts[1].strip().strip('"')
-            dcs = int(parts[2].strip()) if len(parts) > 2 else 0
-            # DCS 72 = UCS2
-            if dcs == 72 or (len(msg) % 4 == 0 and all(c in "0123456789ABCDEFabcdef" for c in msg)):
-                try:
-                    return bytes.fromhex(msg).decode("utf-16-be")
-                except Exception:
-                    pass
-            return msg
+            text = data_bytes.decode("ascii").strip().strip('"')
+            if len(text) % 4 == 0 and all(c in "0123456789ABCDEFabcdef" for c in text):
+                return bytes.fromhex(text).decode("utf-16-be")
         except Exception:
-            return line
+            pass
+
+        # 3) Plain UTF-8 / latin-1
+        for enc in ("utf-8", "latin-1"):
+            try:
+                return data_bytes.decode(enc).strip().strip('"')
+            except Exception:
+                pass
+
+        return data_bytes.decode("ascii", errors="replace").strip()
 
     def enable_clip(self):
         """Zapne zobrazování čísla volajícího."""
