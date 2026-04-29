@@ -181,10 +181,11 @@ class GSM:
         lines = self.read_lines(timeout=20)
         return "\n".join(lines) if lines else ""
 
-    def ussd(self, code, timeout=15):
+    def ussd(self, code, timeout=30):
         """
         Odešle USSD kód (např. '*101#') a vrátí odpověď operátora.
         Odpověď přichází jako URC: +CUSD: 0,"<text>",<dcs>
+        Timeout prodloužen na 30 s — předplacené SIM mohou odpovídat pomaleji.
         """
         self.ser.reset_input_buffer()
         self.ser.write(f'AT+CUSD=1,"{code}",15\r\n'.encode())
@@ -193,14 +194,19 @@ class GSM:
         while time.time() < deadline:
             if self.ser.in_waiting:
                 buf += self.ser.read(self.ser.in_waiting).decode(errors="ignore")
-            for line in buf.splitlines():
-                line = line.strip()
-                if line.startswith("+CUSD"):
-                    return self._parse_cusd(line)
-                if "ERROR" in line.upper():
-                    return "CHYBA: " + line
+                # Hledáme +CUSD kdekoli v akumulovaném bufferu
+                for line in buf.splitlines():
+                    s = line.strip()
+                    if s.startswith("+CUSD"):
+                        return self._parse_cusd(s)
+                    if s.upper().startswith("+CME ERROR") or s.upper().startswith("+CMS ERROR"):
+                        return "CHYBA modemu: " + s
             time.sleep(0.1)
-        return "(žádná odpověď od operátora)"
+        # Vratime raw buffer pokud přišlo něco, ale ne +CUSD — pomůže při ladění
+        raw = buf.strip()
+        if raw:
+            return "(+CUSD nenalezeno, raw odpověď):\n" + raw
+        return "(žádná odpověď od operátora — zkus jiný USSD kód)"
 
     @staticmethod
     def _parse_cusd(line):
