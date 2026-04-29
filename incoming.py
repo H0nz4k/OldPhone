@@ -21,13 +21,41 @@ class IncomingCallListener:
         self.cfg = load_config()
         self.gsm = GSM()
         self.gsm.enable_clip()
-        # Okamžité doručení SMS do terminálu jako +CMT URC
-        self.gsm._send("AT+CNMI=2,2,0,0,0")
-        # Přepneme charset na IRA aby +CMT header byl čitelný
-        self.gsm._send('AT+CSCS="IRA"')
+        self.gsm._send("AT+CMGF=1")          # textový režim
+        self.gsm._send('AT+CSCS="IRA"')      # ASCII charset pro čitelný +CMT header
+        self.gsm._send("AT+CNMI=2,2,0,0,0")  # příchozí SMS → okamžitě jako +CMT URC
         self.ringing = False
         self.caller_number = "neznámé"
-        self._pending_sms_sender = None   # čekáme na text SMS po +CMT hlavičce
+        self._pending_sms_sender = None       # čekáme na text SMS po +CMT hlavičce
+        self._read_stored_sms()
+
+    def _read_stored_sms(self):
+        """Přečte SMS uložené v paměti modemu/SIM (přišly před spuštěním skriptu)."""
+        resp = self.gsm._send('AT+CMGL="ALL"', delay=2)
+        if not resp.strip() or "ERROR" in resp:
+            return
+        lines = resp.strip().splitlines()
+        i = 0
+        found = False
+        while i < len(lines):
+            line = lines[i].strip()
+            if line.startswith("+CMGL:"):
+                # +CMGL: <index>,"REC UNREAD","číslo",,"datum"
+                try:
+                    sender = line.split('"')[3]
+                except IndexError:
+                    sender = "?"
+                if i + 1 < len(lines):
+                    text = self._decode_sms_text(lines[i + 1].strip())
+                    if not found:
+                        print("\n-- Uložené SMS v paměti modemu --")
+                        found = True
+                    print(f"[SMS] Od: {sender}  Text: {text}")
+                    i += 2
+                    continue
+            i += 1
+        if found:
+            print("----------------------------------\n")
 
     def _read_loop(self):
         """Čte sériový port v samostatném vlákně."""
@@ -97,6 +125,10 @@ class IncomingCallListener:
                 self.ringing = False
                 self.caller_number = "neznámé"
                 print("\nNaslouchám... (Ctrl+C pro ukončení)")
+
+        elif line not in ("OK", "ERROR", "AT"):
+            # Debug: vypiš vše co modem pošle a my neznáme
+            print(f"[modem] {line!r}")
 
     def _show_menu(self):
         print("  1 - Přijmout hovor")
