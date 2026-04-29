@@ -19,7 +19,11 @@ def main():
 
     resp = gsm.call(number)
     r = resp.strip()
-    print(f"Odpověď modulu:\n{r if r else '(prázdné — port/baud, napájení HAT, anténa; rychlý test: python3 -c \"from gsm import GSM; g=GSM(); print(g.modem_smoke_test()); g.close()\"')}")
+    if r:
+        print(f"Odpověď modulu:\n{r}")
+    else:
+        print("Odpověď modulu:\n(prázdné — port/baud, napájení HAT, anténa)")
+        print('Tip: python3 -c "from gsm import GSM; g=GSM(); print(g.modem_smoke_test()); g.close()"')
 
     up = r.upper()
     fail = any(
