@@ -62,6 +62,48 @@ class GSM:
     def hangup(self):
         return self._send("ATH")
 
+    def wait_for_call_end(self, max_seconds=7200):
+        """
+        Po úspěšném ATD čte URC z linky. Při zavěšení vzdálenou stranou nebo odmítnutí
+        hovoru modul typicky pošle NO CARRIER nebo NO ANSWER (záleží na operátorovi).
+        """
+        buf = ""
+        end_needles = (
+            "NO CARRIER",
+            "NO ANSWER",
+            "BUSY",
+            "NO DIALTONE",
+            "+CME ERROR",
+        )
+        deadline = time.time() + max_seconds
+        while time.time() < deadline:
+            if self.ser.in_waiting:
+                buf += self.ser.read(self.ser.in_waiting).decode(errors="ignore")
+                while True:
+                    sep_len = 0
+                    cut = None
+                    if "\r\n" in buf:
+                        cut = buf.index("\r\n")
+                        sep_len = 2
+                    elif "\n" in buf:
+                        cut = buf.index("\n")
+                        sep_len = 1
+                    elif "\r" in buf:
+                        cut = buf.index("\r")
+                        sep_len = 1
+                    else:
+                        break
+                    line = buf[:cut].strip()
+                    buf = buf[cut + sep_len :]
+                    if not line:
+                        continue
+                    upper = line.upper()
+                    for needle in end_needles:
+                        if needle in upper:
+                            return needle
+            time.sleep(0.05)
+        return "TIMEOUT"
+
     def answer(self):
         return self._send("ATA")
 

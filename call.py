@@ -41,16 +41,16 @@ def main():
         gsm.close()
         sys.exit(1)
 
-    print("Modul přijal vytáčení. Stiskni Ctrl+C pro zavěšení.")
+    print("Modul přijal vytáčení. Čekám na konec hovoru (zavěšení na druhé straně) — nebo Ctrl+C.")
 
     try:
-        while True:
-            time.sleep(1)
+        reason = gsm.wait_for_call_end()
+        print(f"\nHovor ukončen signálem z modulu: {reason}")
     except KeyboardInterrupt:
-        print("\nZavěšuji...")
-        gsm.hangup()
-        print("Hovor ukončen.")
+        print("\nZavěšuji (Ctrl+C)...")
     finally:
+        gsm.hangup()
+        print("Hotovo.")
         gsm.close()
 
 
