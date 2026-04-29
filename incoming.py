@@ -1,18 +1,21 @@
 #!/usr/bin/env python3
 """
-Naslouchá příchozím hovorům.
-Zobrazí číslo volajícího a nabídne volby:
+Naslouchá příchozím hovorům a SMS.
+
+Hovory:
   1 - Přijmout hovor
   2 - Odmítnout hovor
   3 - Odmítnout a odeslat SMS (text z configu)
 
+SMS:
+  Při příchodu SMS se zobrazí odesílatel a text (včetně diakritiky).
+  Při startu přečte i SMS uložené v paměti modemu ze dřívějška.
+
 Použití: python3 incoming.py
 """
 
-import sys
 import time
 import threading
-import serial
 from gsm import GSM, load_config
 
 
@@ -21,41 +24,72 @@ class IncomingCallListener:
         self.cfg = load_config()
         self.gsm = GSM()
         self.gsm.enable_clip()
-        self.gsm._send("AT+CMGF=1")          # textový režim
-        self.gsm._send('AT+CSCS="IRA"')      # ASCII charset pro čitelný +CMT header
-        self.gsm._send("AT+CNMI=2,2,0,0,0")  # příchozí SMS → okamžitě jako +CMT URC
+        self.gsm._send("AT+CMGF=1")          # textový režim SMS
+        self.gsm._send('AT+CSCS="IRA"')      # ASCII charset — čitelný header
+        # +CMTI: SMS uložena → přečteme přes AT+CMGR (spolehlivé, bez raw UCS2)
+        # Místo +CMT přímé doručení (binární bordel) používáme index notifikaci
+        self.gsm._send("AT+CNMI=2,1,0,0,0")
         self.ringing = False
         self.caller_number = "neznámé"
-        self._pending_sms_sender = None       # čekáme na text SMS po +CMT hlavičce
         self._read_stored_sms()
 
+    # ── Pomocné metody ───────────────────────────────────────────────────────
+
+    @staticmethod
+    def _decode_sms_text(text):
+        """Dekóduje UCS2 hex string (diakritika); jinak vrátí plain text."""
+        t = text.strip()
+        if len(t) % 4 == 0 and len(t) >= 4 and all(c in "0123456789ABCDEFabcdef" for c in t):
+            try:
+                return bytes.fromhex(t).decode("utf-16-be")
+            except Exception:
+                pass
+        return t
+
+    def _read_sms_by_index(self, index):
+        """Přečte SMS na daném indexu přes AT+CMGR a vrátí (odesílatel, text)."""
+        resp = self.gsm._send(f"AT+CMGR={index}", delay=1)
+        lines = [l.strip() for l in resp.strip().splitlines() if l.strip()]
+        sender, text = "?", ""
+        for i, line in enumerate(lines):
+            if line.startswith("+CMGR:"):
+                try:
+                    sender = line.split('"')[3]
+                except IndexError:
+                    pass
+                if i + 1 < len(lines):
+                    text = self._decode_sms_text(lines[i + 1])
+                break
+        return sender, text
+
     def _read_stored_sms(self):
-        """Přečte SMS uložené v paměti modemu/SIM (přišly před spuštěním skriptu)."""
+        """Přečte všechny SMS uložené v paměti modemu/SIM."""
         resp = self.gsm._send('AT+CMGL="ALL"', delay=2)
         if not resp.strip() or "ERROR" in resp:
             return
         lines = resp.strip().splitlines()
-        i = 0
         found = False
+        i = 0
         while i < len(lines):
             line = lines[i].strip()
             if line.startswith("+CMGL:"):
-                # +CMGL: <index>,"REC UNREAD","číslo",,"datum"
                 try:
                     sender = line.split('"')[3]
                 except IndexError:
                     sender = "?"
-                if i + 1 < len(lines):
-                    text = self._decode_sms_text(lines[i + 1].strip())
-                    if not found:
-                        print("\n-- Uložené SMS v paměti modemu --")
-                        found = True
-                    print(f"[SMS] Od: {sender}  Text: {text}")
-                    i += 2
-                    continue
+                text = self._decode_sms_text(lines[i + 1].strip()) if i + 1 < len(lines) else ""
+                if not found:
+                    print("\n-- Uložené SMS v paměti modemu --")
+                    found = True
+                print(f"[SMS] Od: {sender}")
+                print(f"      Text: {text}")
+                i += 2
+                continue
             i += 1
         if found:
             print("----------------------------------\n")
+
+    # ── Čtecí smyčka ────────────────────────────────────────────────────────
 
     def _read_loop(self):
         """Čte sériový port v samostatném vlákně."""
@@ -70,44 +104,28 @@ class IncomingCallListener:
                     self._process_line(line.strip())
             time.sleep(0.05)
 
-    @staticmethod
-    def _decode_sms_text(text):
-        """Pokusí se dekódovat UCS2 hex text SMS, jinak vrátí tak jak je."""
-        t = text.strip()
-        if len(t) % 4 == 0 and len(t) >= 4 and all(c in "0123456789ABCDEFabcdef" for c in t):
-            try:
-                return bytes.fromhex(t).decode("utf-16-be")
-            except Exception:
-                pass
-        return t
-
     def _process_line(self, line):
         if not line:
             return
 
-        # ── Příchozí SMS ────────────────────────────────────────────────
-        if line.startswith("+CMT:"):
-            # +CMT: "+420731164187","","26/04/30,01:00:00+08"
+        # ── Příchozí SMS (index notifikace) ─────────────────────────────────
+        if line.startswith("+CMTI:"):
+            # +CMTI: "SM",3  nebo  +CMTI: "ME",3
             try:
-                self._pending_sms_sender = line.split('"')[1]
-            except IndexError:
-                self._pending_sms_sender = "neznámé"
-            return   # text SMS přijde na dalším řádku
-
-        if self._pending_sms_sender is not None:
-            sender = self._pending_sms_sender
-            self._pending_sms_sender = None
-            text = self._decode_sms_text(line)
+                index = int(line.split(",")[-1].strip())
+            except ValueError:
+                return
+            sender, text = self._read_sms_by_index(index)
             print(f"\n[SMS] Od: {sender}")
             print(f"      Text: {text}")
             print("\nNaslouchám... (Ctrl+C pro ukončení)")
             return
 
-        # ── Příchozí hovor ───────────────────────────────────────────────
+        # ── Příchozí hovor ───────────────────────────────────────────────────
         if line == "RING":
             if not self.ringing:
                 self.ringing = True
-                print(f"\nPrichozi hovor od: {self.caller_number}")
+                print(f"\nPříchozí hovor od: {self.caller_number}")
                 self._show_menu()
 
         elif line.startswith("+CLIP:"):
@@ -115,7 +133,7 @@ class IncomingCallListener:
             try:
                 self.caller_number = line.split('"')[1]
                 if self.ringing:
-                    print(f"   Cislo: {self.caller_number}")
+                    print(f"   Číslo: {self.caller_number}")
             except IndexError:
                 pass
 
@@ -126,9 +144,11 @@ class IncomingCallListener:
                 self.caller_number = "neznámé"
                 print("\nNaslouchám... (Ctrl+C pro ukončení)")
 
-        elif line not in ("OK", "ERROR", "AT"):
-            # Debug: vypiš vše co modem pošle a my neznáme
+        elif line not in ("OK", "ERROR"):
+            # Debug — vypiš vše neznámé co modem pošle
             print(f"[modem] {line!r}")
+
+    # ── Vstup od uživatele ───────────────────────────────────────────────────
 
     def _show_menu(self):
         print("  1 - Přijmout hovor")
@@ -137,7 +157,6 @@ class IncomingCallListener:
         print("Volba: ", end="", flush=True)
 
     def _handle_input(self):
-        """Zpracovává vstup od uživatele v samostatném vlákně."""
         while self.running:
             try:
                 choice = input()
@@ -154,16 +173,15 @@ class IncomingCallListener:
                 print("Hovor přijat. Stiskni Enter pro zavěšení.")
                 input()
                 self.gsm.hangup()
-                self.ringing = False
                 self.caller_number = "neznámé"
-                print("\nNaslouchám příchozím hovorům... (Ctrl+C pro ukončení)")
+                print("\nNaslouchám... (Ctrl+C pro ukončení)")
 
             elif choice == "2":
                 print("Odmítám hovor...")
                 self.gsm.hangup()
                 self.ringing = False
                 self.caller_number = "neznámé"
-                print("\nNaslouchám příchozím hovorům... (Ctrl+C pro ukončení)")
+                print("\nNaslouchám... (Ctrl+C pro ukončení)")
 
             elif choice == "3":
                 number = self.caller_number
@@ -177,17 +195,17 @@ class IncomingCallListener:
                     print(f"SMS odeslána na {number}.")
                 else:
                     print("SMS se nepodařilo odeslat.")
-                print("\nNaslouchám příchozím hovorům... (Ctrl+C pro ukončení)")
+                print("\nNaslouchám... (Ctrl+C pro ukončení)")
+
+    # ── Hlavní smyčka ────────────────────────────────────────────────────────
 
     def run(self):
         self.running = True
         print("Naslouchám příchozím hovorům a SMS... (Ctrl+C pro ukončení)")
-
         reader = threading.Thread(target=self._read_loop, daemon=True)
         handler = threading.Thread(target=self._handle_input, daemon=True)
         reader.start()
         handler.start()
-
         try:
             while True:
                 time.sleep(0.5)
