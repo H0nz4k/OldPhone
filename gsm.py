@@ -185,27 +185,36 @@ class GSM:
         """
         Odešle USSD kód (např. '*101#') a vrátí odpověď operátora.
         Odpověď přichází jako URC: +CUSD: 0,"<text>",<dcs>
-        Timeout prodloužen na 30 s — předplacené SIM mohou odpovídat pomaleji.
+
+        Před dotazem přepne charset na IRA (plain ASCII), aby modem neposílal
+        USSD odpověď jako raw UCS2 binární bajty (důsledek AT+CSCS="UCS2" pro SMS).
         """
+        self._send('AT+CSCS="IRA"')   # reset charsetuf na plain ASCII pro USSD
         self.ser.reset_input_buffer()
         self.ser.write(f'AT+CUSD=1,"{code}",15\r\n'.encode())
-        buf = ""
+        buf = b""
         deadline = time.time() + timeout
         while time.time() < deadline:
             if self.ser.in_waiting:
-                buf += self.ser.read(self.ser.in_waiting).decode(errors="ignore")
-                # Hledáme +CUSD kdekoli v akumulovaném bufferu
-                for line in buf.splitlines():
-                    s = line.strip()
-                    if s.startswith("+CUSD"):
-                        return self._parse_cusd(s)
-                    if s.upper().startswith("+CME ERROR") or s.upper().startswith("+CMS ERROR"):
-                        return "CHYBA modemu: " + s
+                buf += self.ser.read(self.ser.in_waiting)
+            # Prohledáme aktuální buffer po řádcích
+            for raw_line in buf.split(b"\r\n"):
+                try:
+                    s = raw_line.decode("utf-8", errors="replace").strip()
+                except Exception:
+                    s = raw_line.decode("latin-1", errors="replace").strip()
+                if s.startswith("+CUSD"):
+                    return self._parse_cusd(s)
+                if s.upper().startswith("+CME ERROR") or s.upper().startswith("+CMS ERROR"):
+                    return "CHYBA modemu: " + s
             time.sleep(0.1)
-        # Vratime raw buffer pokud přišlo něco, ale ne +CUSD — pomůže při ladění
-        raw = buf.strip()
-        if raw:
-            return "(+CUSD nenalezeno, raw odpověď):\n" + raw
+        # Vrátíme raw jako text pro ladění
+        try:
+            raw_str = buf.decode("utf-8", errors="replace").strip()
+        except Exception:
+            raw_str = repr(buf)
+        if raw_str:
+            return "(+CUSD nenalezeno, raw odpověď):\n" + raw_str
         return "(žádná odpověď od operátora — zkus jiný USSD kód)"
 
     @staticmethod
