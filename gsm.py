@@ -18,6 +18,7 @@ class GSM:
         )
         time.sleep(1)
         self._send("ATE0")  # vypni echo modulu
+        self._call_rx_rest = ""
 
     def _send(self, cmd, delay=0.5):
         self.ser.write((cmd + "\r\n").encode())
@@ -39,13 +40,54 @@ class GSM:
         return lines
 
     def call(self, number):
-        """ATD — odpověď chodí asynchronně (OK / NO CARRIER / BUSY …), nelze ji přečíst jedním _send."""
+        """
+        ATD — čte jen do prvního řádku OK (= příkaz vytáčení přijat).
+        NO CARRIER po skutečném hovoru nesmí skončit v této odpovědi, jinak call.py
+        hlásí falešné selhání; zbytek bufferu předá wait_for_call_end().
+        """
         num = "".join(number.split())
         self.ser.reset_input_buffer()
+        self._call_rx_rest = ""
         self.ser.write(f"ATD{num};\r\n".encode())
         time.sleep(0.2)
-        lines = self.read_lines(timeout=25)
-        return "\n".join(lines) if lines else ""
+        buf = ""
+        out_lines = []
+        deadline = time.time() + 45
+        while time.time() < deadline:
+            if self.ser.in_waiting:
+                buf += self.ser.read(self.ser.in_waiting).decode(errors="ignore")
+            while True:
+                sep_len = 0
+                cut = None
+                if "\r\n" in buf:
+                    cut = buf.index("\r\n")
+                    sep_len = 2
+                elif "\n" in buf:
+                    cut = buf.index("\n")
+                    sep_len = 1
+                elif "\r" in buf:
+                    cut = buf.index("\r")
+                    sep_len = 1
+                else:
+                    break
+                line = buf[:cut].strip()
+                buf = buf[cut + sep_len :]
+                if not line:
+                    continue
+                out_lines.append(line)
+                up = line.upper()
+                if up == "OK":
+                    self._call_rx_rest = buf
+                    return "\n".join(out_lines)
+                if any(x in up for x in ("BUSY", "NO DIALTONE", "+CME ERROR")):
+                    self._call_rx_rest = buf
+                    return "\n".join(out_lines)
+                if "NO CARRIER" in up:
+                    self._call_rx_rest = buf
+                    return "\n".join(out_lines)
+            time.sleep(0.05)
+        self._call_rx_rest = buf
+        return "\n".join(out_lines) if out_lines else ""
 
     def modem_smoke_test(self):
         """Krátká kontrola spojení s modulem (pro ladění)."""
@@ -76,31 +118,33 @@ class GSM:
             "+CME ERROR",
         )
         deadline = time.time() + max_seconds
+        buf = (getattr(self, "_call_rx_rest", None) or "") + buf
+        self._call_rx_rest = ""
         while time.time() < deadline:
             if self.ser.in_waiting:
                 buf += self.ser.read(self.ser.in_waiting).decode(errors="ignore")
-                while True:
-                    sep_len = 0
-                    cut = None
-                    if "\r\n" in buf:
-                        cut = buf.index("\r\n")
-                        sep_len = 2
-                    elif "\n" in buf:
-                        cut = buf.index("\n")
-                        sep_len = 1
-                    elif "\r" in buf:
-                        cut = buf.index("\r")
-                        sep_len = 1
-                    else:
-                        break
-                    line = buf[:cut].strip()
-                    buf = buf[cut + sep_len :]
-                    if not line:
-                        continue
-                    upper = line.upper()
-                    for needle in end_needles:
-                        if needle in upper:
-                            return needle
+            while True:
+                sep_len = 0
+                cut = None
+                if "\r\n" in buf:
+                    cut = buf.index("\r\n")
+                    sep_len = 2
+                elif "\n" in buf:
+                    cut = buf.index("\n")
+                    sep_len = 1
+                elif "\r" in buf:
+                    cut = buf.index("\r")
+                    sep_len = 1
+                else:
+                    break
+                line = buf[:cut].strip()
+                buf = buf[cut + sep_len :]
+                if not line:
+                    continue
+                upper = line.upper()
+                for needle in end_needles:
+                    if needle in upper:
+                        return needle
             time.sleep(0.05)
         return "TIMEOUT"
 
