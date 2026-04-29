@@ -21,8 +21,13 @@ class IncomingCallListener:
         self.cfg = load_config()
         self.gsm = GSM()
         self.gsm.enable_clip()
+        # Okamžité doručení SMS do terminálu jako +CMT URC
+        self.gsm._send("AT+CNMI=2,2,0,0,0")
+        # Přepneme charset na IRA aby +CMT header byl čitelný
+        self.gsm._send('AT+CSCS="IRA"')
         self.ringing = False
         self.caller_number = "neznámé"
+        self._pending_sms_sender = None   # čekáme na text SMS po +CMT hlavičce
 
     def _read_loop(self):
         """Čte sériový port v samostatném vlákně."""
@@ -37,14 +42,44 @@ class IncomingCallListener:
                     self._process_line(line.strip())
             time.sleep(0.05)
 
+    @staticmethod
+    def _decode_sms_text(text):
+        """Pokusí se dekódovat UCS2 hex text SMS, jinak vrátí tak jak je."""
+        t = text.strip()
+        if len(t) % 4 == 0 and len(t) >= 4 and all(c in "0123456789ABCDEFabcdef" for c in t):
+            try:
+                return bytes.fromhex(t).decode("utf-16-be")
+            except Exception:
+                pass
+        return t
+
     def _process_line(self, line):
         if not line:
             return
 
+        # ── Příchozí SMS ────────────────────────────────────────────────
+        if line.startswith("+CMT:"):
+            # +CMT: "+420731164187","","26/04/30,01:00:00+08"
+            try:
+                self._pending_sms_sender = line.split('"')[1]
+            except IndexError:
+                self._pending_sms_sender = "neznámé"
+            return   # text SMS přijde na dalším řádku
+
+        if self._pending_sms_sender is not None:
+            sender = self._pending_sms_sender
+            self._pending_sms_sender = None
+            text = self._decode_sms_text(line)
+            print(f"\n[SMS] Od: {sender}")
+            print(f"      Text: {text}")
+            print("\nNaslouchám... (Ctrl+C pro ukončení)")
+            return
+
+        # ── Příchozí hovor ───────────────────────────────────────────────
         if line == "RING":
             if not self.ringing:
                 self.ringing = True
-                print(f"\n📞 Příchozí hovor od: {self.caller_number}")
+                print(f"\nPrichozi hovor od: {self.caller_number}")
                 self._show_menu()
 
         elif line.startswith("+CLIP:"):
@@ -52,7 +87,7 @@ class IncomingCallListener:
             try:
                 self.caller_number = line.split('"')[1]
                 if self.ringing:
-                    print(f"   Číslo: {self.caller_number}")
+                    print(f"   Cislo: {self.caller_number}")
             except IndexError:
                 pass
 
@@ -61,7 +96,7 @@ class IncomingCallListener:
                 print(f"\nVolající zavěsil ({line}).")
                 self.ringing = False
                 self.caller_number = "neznámé"
-                print("\nNaslouchám příchozím hovorům... (Ctrl+C pro ukončení)")
+                print("\nNaslouchám... (Ctrl+C pro ukončení)")
 
     def _show_menu(self):
         print("  1 - Přijmout hovor")
@@ -114,7 +149,7 @@ class IncomingCallListener:
 
     def run(self):
         self.running = True
-        print("Naslouchám příchozím hovorům... (Ctrl+C pro ukončení)")
+        print("Naslouchám příchozím hovorům a SMS... (Ctrl+C pro ukončení)")
 
         reader = threading.Thread(target=self._read_loop, daemon=True)
         handler = threading.Thread(target=self._handle_input, daemon=True)
