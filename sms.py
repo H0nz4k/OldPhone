@@ -19,10 +19,13 @@ def main():
 
     gsm = GSM()
     resp = gsm.send_sms(number, text)
-    print(f"Odpověď modulu: {resp.strip()}")
+    r = resp.strip()
+    print(f"Odpověď modulu:\n{r if r else '(prázdná — zkontroluj signál, registraci sítě a formát čísla +420…)'}")
 
     if "+CMGS" in resp:
         print("SMS odeslána úspěšně.")
+    elif "+CMS ERROR" in resp or ("ERROR" in resp and "+CMGS" not in resp):
+        print("Modul vrátil chybu (viz odpověď výše).")
     else:
         print("Chyba při odesílání SMS.")
 

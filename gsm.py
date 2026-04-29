@@ -39,8 +39,25 @@ class GSM:
         return lines
 
     def call(self, number):
-        resp = self._send(f"ATD{number};", delay=1)
-        return resp
+        """ATD — odpověď chodí asynchronně (OK / NO CARRIER / BUSY …), nelze ji přečíst jedním _send."""
+        num = "".join(number.split())
+        self.ser.reset_input_buffer()
+        self.ser.write(f"ATD{num};\r\n".encode())
+        time.sleep(0.2)
+        lines = self.read_lines(timeout=25)
+        return "\n".join(lines) if lines else ""
+
+    def modem_smoke_test(self):
+        """Krátká kontrola spojení s modulem (pro ladění)."""
+        self.ser.reset_input_buffer()
+        out = []
+        for cmd in ("AT", "AT+CSQ", "AT+CREG?", "AT+COPS?"):
+            self.ser.write((cmd + "\r\n").encode())
+            time.sleep(0.5)
+            chunk = self.ser.read(self.ser.in_waiting).decode(errors="ignore")
+            if chunk.strip():
+                out.append(chunk.strip())
+        return "\n".join(out)
 
     def hangup(self):
         return self._send("ATH")
@@ -50,11 +67,12 @@ class GSM:
 
     def send_sms(self, number, text):
         self._send("AT+CMGF=1")  # textový režim
+        self.ser.reset_input_buffer()
         self.ser.write(f'AT+CMGS="{number}"\r\n'.encode())
         time.sleep(0.5)
         self.ser.write((text + chr(26)).encode())  # Ctrl+Z = odeslat
-        time.sleep(3)
-        return self.ser.read(self.ser.in_waiting).decode(errors="ignore")
+        lines = self.read_lines(timeout=15)
+        return "\n".join(lines) if lines else ""
 
     def enable_clip(self):
         """Zapne zobrazování čísla volajícího."""

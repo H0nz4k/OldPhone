@@ -18,8 +18,26 @@ def main():
     gsm = GSM()
 
     resp = gsm.call(number)
-    print(f"Odpověď modulu: {resp.strip()}")
-    print("Hovor zahájen. Stiskni Ctrl+C pro zavěšení.")
+    r = resp.strip()
+    print(f"Odpověď modulu:\n{r if r else '(prázdné — port/baud, napájení HAT, anténa; rychlý test: python3 -c \"from gsm import GSM; g=GSM(); print(g.modem_smoke_test()); g.close()\"')}")
+
+    up = r.upper()
+    fail = any(
+        x in up
+        for x in (
+            "NO CARRIER",
+            "BUSY",
+            "NO DIALTONE",
+            "+CME ERROR",
+            "+CMS ERROR",
+        )
+    ) or ("ERROR" in up and "OK" not in up)
+    if fail or not r:
+        print("Hovor pravděpodobně neproběhl — zkontroluj výše uvedenou odpověď a registraci v síti.")
+        gsm.close()
+        sys.exit(1)
+
+    print("Modul přijal vytáčení. Stiskni Ctrl+C pro zavěšení.")
 
     try:
         while True:
