@@ -17,7 +17,10 @@ class GSM:
             timeout=cfg.get("timeout", 1)
         )
         time.sleep(1)
-        self._send("ATE0")  # vypni echo modulu
+        self._send("ATE0")              # vypni echo modulu
+        self._send("AT+CMGF=1")        # textový režim SMS
+        self._send('AT+CSCS="IRA"')    # výchozí charset — ASCII
+        self._send("AT+CNMI=0,0,0,0,0")  # zakáže SMS URC; skripty si ho zapnou samy
         self._call_rx_rest = ""
 
     def _send(self, cmd, delay=0.5):
@@ -152,14 +155,16 @@ class GSM:
         return self._send("ATA")
 
     def send_sms(self, number, text):
-        self._send("AT+CMGF=1")       # textový režim
-        self._send('AT+CSCS="UCS2"')  # UCS2 pro plnou podporu diakritiky
+        """Odešle SMS s plnou podporou diakritiky (UCS2 hex encoding)."""
+        self._send("AT+CMGF=1")
+        self._send('AT+CSCS="UCS2"')
 
-        # Číslo zůstává v ASCII; text kódujeme jako UCS2 hex
-        ucs2_text = text.encode("utf-16-be").hex().upper()
+        # V UCS2 režimu musí být i číslo (DA) zakódováno jako UCS2 hex
+        number_ucs2 = number.encode("utf-16-be").hex().upper()
+        text_ucs2 = text.encode("utf-16-be").hex().upper()
 
         self.ser.reset_input_buffer()
-        self.ser.write(f'AT+CMGS="{number}"\r\n'.encode())
+        self.ser.write(f'AT+CMGS="{number_ucs2}"\r\n'.encode())
 
         # Čekáme na výzvu '>' od modemu
         deadline = time.time() + 5
@@ -174,24 +179,28 @@ class GSM:
             time.sleep(0.05)
 
         if not prompt_ok:
+            # Zkusíme znovu s ASCII číslem (některé modemy nevyžadují UCS2 číslo)
+            self.ser.reset_input_buffer()
+            self.ser.write(f'AT+CMGS="{number}"\r\n'.encode())
+            deadline2 = time.time() + 5
+            while time.time() < deadline2:
+                if self.ser.in_waiting:
+                    buf += self.ser.read(self.ser.in_waiting).decode(errors="ignore")
+                    if ">" in buf:
+                        prompt_ok = True
+                        break
+                time.sleep(0.05)
+
+        if not prompt_ok:
+            self._send('AT+CSCS="IRA"')   # vrátíme charset
             return "ERROR: no prompt from modem"
 
-        # Odešleme UCS2 text + Ctrl+Z
-        self.ser.write((ucs2_text + chr(26)).encode())
+        self.ser.write((text_ucs2 + chr(26)).encode())
         lines = self.read_lines(timeout=20)
+        self._send('AT+CSCS="IRA"')   # vrátíme charset do výchozího stavu
         return "\n".join(lines) if lines else ""
 
-    # GSM-7 default alphabet table (3GPP TS 23.038)
-    _GSM7 = (
-        "@£$¥èéùìòÇ\nØø\rÅå"
-        "ΔΦΓΛΩΠΨΣΘΞÆæßÉ"
-        " !\"#¤%&'()*+,-./"
-        "0123456789:;<=>?"
-        "¡ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-        "ÄÖÑÜ§¿abcdefghijklmnopqrstuvwxyz"
-        "äöñüà"
-    )
-    # Correct full 128-char GSM7 table
+    # GSM-7 default alphabet table (3GPP TS 23.038) — pouze unicode escape sekvence
     _GSM7_TABLE = (
         "@£$¥èéùìòÇ\nØø\rÅå"
         "\u0394_\u03a6\u0393\u039b\u03a9\u03a0\u03a8\u03a3\u0398\u039e\x1b\u00c6\u00e6\u00df\u00c9"
