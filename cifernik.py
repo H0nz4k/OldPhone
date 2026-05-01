@@ -70,34 +70,40 @@ class Cifernik:
                 return None
             time.sleep(0.005)
 
-        # Počítáme pulzy pomocí pigpio callback (DMA přesnost, žádné preempce)
+        # Počítáme pulzy pomocí pigpio callbacků (DMA přesnost).
+        # Oba callbacky (PULSE + START) sdílí hardware tick → přesné pořadí událostí.
         pulse_count = 0
         lock = threading.Lock()
-        last_fall = [0.0]
-        DEBOUNCE = 0.020   # 20 ms — zákmity jsou <5ms, pulzy ~100ms od sebe
-        done = [False]
+        last_fall_tick = [0]
+        start_high_tick = [None]     # hardware tick kdy START šel HIGH
+        DEBOUNCE_US = 20_000         # 20 ms v mikrosekundách (pigpio tick)
+
+        def _on_start_high(gpio, level, tick):
+            """Jakmile START jde HIGH, zaznamenáme hardware tick."""
+            start_high_tick[0] = tick
 
         def _on_pulse(gpio, level, tick):
             nonlocal pulse_count
-            if done[0]:
-                return          # START už šel HIGH → ignoruj pozdní bounce
-            now = time.time()
+            # Ignoruj pulzy po (nebo příliš blízko před) START→HIGH
+            if start_high_tick[0] is not None:
+                return
             with lock:
-                if now - last_fall[0] >= DEBOUNCE:
+                dt = (tick - last_fall_tick[0]) & 0xFFFFFFFF  # wraparound safe
+                if dt >= DEBOUNCE_US:
                     pulse_count += 1
-                    last_fall[0] = now
+                    last_fall_tick[0] = tick
 
-        cb = _pi.callback(self.pin_pulse, pigpio.FALLING_EDGE, _on_pulse)
+        cb_start = _pi.callback(self.pin_start, pigpio.RISING_EDGE,  _on_start_high)
+        cb_pulse = _pi.callback(self.pin_pulse, pigpio.FALLING_EDGE, _on_pulse)
 
-        # Čekáme dokud se číselník točí
+        # Čekáme dokud se číselník točí (START == LOW)
         while _pi.read(self.pin_start) == 0:
             time.sleep(0.002)
 
-        # Označíme konec — callback přestane počítat
-        done[0] = True
-        # Krátká pauza jen pro případ že poslední callback ještě letí
-        time.sleep(0.015)
-        cb.cancel()
+        # Krátká pauza — pigpio zpracuje všechny callbacky ve frontě
+        time.sleep(0.020)
+        cb_start.cancel()
+        cb_pulse.cancel()
 
         time.sleep(0.020)
 
