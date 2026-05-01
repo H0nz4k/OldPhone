@@ -8,7 +8,7 @@ Použití: python3 call.py
 import sys
 import time
 from gsm import GSM, load_config
-from led import LED
+from led import LEDs
 
 
 def main():
@@ -17,7 +17,8 @@ def main():
 
     print(f"Vytáčím: {number}")
     gsm = GSM()
-    led = LED()
+    leds = LEDs()
+    led = leds.led1   # LED1 = hlavní (hovory)
     led.blink("dial")
 
     resp = gsm.call(number)
@@ -40,7 +41,7 @@ def main():
         )
     ) or ("ERROR" in up and "OK" not in up)
     if fail or not r:
-        led.cleanup()
+        leds.cleanup()
         print("Hovor pravděpodobně neproběhl — zkontroluj výše uvedenou odpověď a registraci v síti.")
         gsm.close()
         sys.exit(1)
@@ -55,7 +56,7 @@ def main():
         print("\nZavěšuji (Ctrl+C)...")
     finally:
         gsm.hangup()
-        led.cleanup()
+        leds.cleanup()
         print("Hotovo.")
         gsm.close()
 

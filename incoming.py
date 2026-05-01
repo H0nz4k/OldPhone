@@ -17,7 +17,7 @@ Použití: python3 incoming.py
 import time
 import threading
 from gsm import GSM, load_config
-from led import LED
+from led import LEDs
 from buttons import Buttons
 
 
@@ -25,7 +25,8 @@ class IncomingCallListener:
     def __init__(self):
         self.cfg = load_config()
         self.gsm = GSM()
-        self.led = LED()
+        self.leds = LEDs()
+        self.led = self.leds.led1   # LED1 = hlavní (hovory/SMS)
         self.buttons = Buttons()
         self.buttons.on_hook_press    = self._hook_button_pressed
         self.buttons.on_button2_press = self._button2_pressed
@@ -261,7 +262,7 @@ class IncomingCallListener:
             if self.ringing or self._call_active:
                 self.gsm.hangup()
             self.buttons.cleanup()
-            self.led.cleanup()
+            self.leds.cleanup()
             self.gsm.close()
 
 
