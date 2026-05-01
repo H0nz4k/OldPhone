@@ -75,9 +75,12 @@ class Cifernik:
         lock = threading.Lock()
         last_fall = [0.0]
         DEBOUNCE = 0.020   # 20 ms — zákmity jsou <5ms, pulzy ~100ms od sebe
+        done = [False]
 
         def _on_pulse(gpio, level, tick):
             nonlocal pulse_count
+            if done[0]:
+                return          # START už šel HIGH → ignoruj pozdní bounce
             now = time.time()
             with lock:
                 if now - last_fall[0] >= DEBOUNCE:
@@ -90,8 +93,10 @@ class Cifernik:
         while _pi.read(self.pin_start) == 0:
             time.sleep(0.002)
 
-        # Krátká pauza — pigpio callback může ještě zpracovávat
-        time.sleep(0.080)
+        # Označíme konec — callback přestane počítat
+        done[0] = True
+        # Krátká pauza jen pro případ že poslední callback ještě letí
+        time.sleep(0.015)
         cb.cancel()
 
         time.sleep(0.020)
