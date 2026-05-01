@@ -8,6 +8,7 @@ Použití: python3 call.py
 import sys
 import time
 from gsm import GSM, load_config
+from led import LED
 
 
 def main():
@@ -16,6 +17,8 @@ def main():
 
     print(f"Vytáčím: {number}")
     gsm = GSM()
+    led = LED()
+    led.blink("dial")
 
     resp = gsm.call(number)
     r = resp.strip()
@@ -37,11 +40,13 @@ def main():
         )
     ) or ("ERROR" in up and "OK" not in up)
     if fail or not r:
+        led.cleanup()
         print("Hovor pravděpodobně neproběhl — zkontroluj výše uvedenou odpověď a registraci v síti.")
         gsm.close()
         sys.exit(1)
 
     print("Modul přijal vytáčení. Čekám na konec hovoru (zavěšení na druhé straně) — nebo Ctrl+C.")
+    led.blink("call_active")
 
     try:
         reason = gsm.wait_for_call_end()
@@ -50,6 +55,7 @@ def main():
         print("\nZavěšuji (Ctrl+C)...")
     finally:
         gsm.hangup()
+        led.cleanup()
         print("Hotovo.")
         gsm.close()
 

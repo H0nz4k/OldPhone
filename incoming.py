@@ -17,12 +17,14 @@ Použití: python3 incoming.py
 import time
 import threading
 from gsm import GSM, load_config
+from led import LED
 
 
 class IncomingCallListener:
     def __init__(self):
         self.cfg = load_config()
         self.gsm = GSM()
+        self.led = LED()
         self.gsm.enable_clip()
         self.gsm._send("AT+CMGF=1")          # textový režim SMS
         self.gsm._send('AT+CSCS="IRA"')      # ASCII charset — čitelný header
@@ -116,6 +118,7 @@ class IncomingCallListener:
             except ValueError:
                 return
             sender, text = self._read_sms_by_index(index)
+            self.led.sms_flash()
             print(f"\n[SMS] Od: {sender}")
             print(f"      Text: {text}")
             print("\nNaslouchám... (Ctrl+C pro ukončení)")
@@ -125,6 +128,7 @@ class IncomingCallListener:
         if line == "RING":
             if not self.ringing:
                 self.ringing = True
+                self.led.blink("ring")
                 print(f"\nPříchozí hovor od: {self.caller_number}")
                 self._show_menu()
 
@@ -139,6 +143,7 @@ class IncomingCallListener:
 
         elif line in ("NO CARRIER", "BUSY", "NO ANSWER"):
             if self.ringing:
+                self.led.off()
                 print(f"\nVolající zavěsil ({line}).")
                 self.ringing = False
                 self.caller_number = "neznámé"
@@ -170,9 +175,11 @@ class IncomingCallListener:
                 print("Přijímám hovor...")
                 self.gsm.answer()
                 self.ringing = False
+                self.led.blink("call_active")
                 print("Hovor přijat. Stiskni Enter pro zavěšení.")
                 input()
                 self.gsm.hangup()
+                self.led.off()
                 self.caller_number = "neznámé"
                 print("\nNaslouchám... (Ctrl+C pro ukončení)")
 
@@ -180,6 +187,7 @@ class IncomingCallListener:
                 print("Odmítám hovor...")
                 self.gsm.hangup()
                 self.ringing = False
+                self.led.off()
                 self.caller_number = "neznámé"
                 print("\nNaslouchám... (Ctrl+C pro ukončení)")
 
@@ -189,6 +197,7 @@ class IncomingCallListener:
                 print("Odmítám hovor a odesílám SMS...")
                 self.gsm.hangup()
                 self.ringing = False
+                self.led.off()
                 self.caller_number = "neznámé"
                 resp = self.gsm.send_sms(number, sms_text)
                 if "+CMGS" in resp:
@@ -215,6 +224,7 @@ class IncomingCallListener:
             self.running = False
             if self.ringing:
                 self.gsm.hangup()
+            self.led.cleanup()
             self.gsm.close()
 
 
