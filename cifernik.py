@@ -85,12 +85,24 @@ class Cifernik:
                     duration = time.time() - fall_time
                     if duration >= MIN_PULSE_S:
                         pulse_count += 1
-                    # debug — odkomentuj pokud chceš vidět délky pulzů:
+                    # debug — odkomentuj pro ladění:
                     # print(f"    [pulse {duration*1000:.1f} ms → {'OK' if duration >= MIN_PULSE_S else 'skip'}]")
                 fall_time = None
 
             last_state = state
             time.sleep(0.001)
+
+        # ── Zachytit poslední pulz ───────────────────────────────────────────
+        # START šel HIGH, ale PULSE může být stále LOW (poslední pulz ještě běží).
+        # Počkáme až PULSE dokončí a pulz započítáme.
+        if fall_time is not None:
+            deadline2 = time.time() + 0.150   # max 150 ms čekání
+            while GPIO.input(self.pin_pulse) == 0 and time.time() < deadline2:
+                time.sleep(0.001)
+            duration = time.time() - fall_time
+            if duration >= MIN_PULSE_S:
+                pulse_count += 1
+            # print(f"    [last pulse {duration*1000:.1f} ms → {'OK' if duration >= MIN_PULSE_S else 'skip'}]")
 
         # Krátká pauza po ukončení — necháme kontakty ustálit
         time.sleep(0.050)
