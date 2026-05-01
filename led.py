@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """
-LED indikátory — 3 nezávislé LED diody.
+LED indikátory — 5 nezávislých LED diod.
 
 Zapojení (každá LED přes rezistor ~220 Ω na GND):
   BCM 21  (pin 40) → LED1  — hlavní (hovory)
   BCM  6  (pin 31) → LED2  — rezerva
   BCM  5  (pin 29) → LED3  — rezerva
-  GND     (pin 39) → společná katoda všech LED
+  BCM 12  (pin 32) → LED4  — rezerva
+  BCM 13  (pin 33) → LED5  — rezerva
+  GND     (pin 34) → společná katoda všech LED
 
 Vzory blikání:
   ring        — rychlé blikání 0.15 s (příchozí hovor)
@@ -40,6 +42,8 @@ except ImportError:
 PIN_LED1 = 21   # pin 40 — hlavní (hovory)
 PIN_LED2 =  6   # pin 31 — rezerva
 PIN_LED3 =  5   # pin 29 — rezerva
+PIN_LED4 = 12   # pin 32 — rezerva
+PIN_LED5 = 13   # pin 33 — rezerva
 
 _gpio_initialized = False
 
@@ -153,37 +157,44 @@ class LED:
 
 class LEDs:
     """
-    Skupina všech 3 LED — pohodlný přístup přes leds.led1 / .led2 / .led3.
+    Skupina všech 5 LED — přístup přes leds.led1 … leds.led5.
 
     Použití:
       leds = LEDs()
       leds.led1.blink("ring")
       leds.led2.on()
+      leds.all_off()
       leds.cleanup()
     """
 
     def __init__(self,
                  pin1: int = PIN_LED1,
                  pin2: int = PIN_LED2,
-                 pin3: int = PIN_LED3):
+                 pin3: int = PIN_LED3,
+                 pin4: int = PIN_LED4,
+                 pin5: int = PIN_LED5):
         self.led1 = LED(pin1)   # BCM 21, pin 40 — hlavní
         self.led2 = LED(pin2)   # BCM  6, pin 31 — rezerva
         self.led3 = LED(pin3)   # BCM  5, pin 29 — rezerva
+        self.led4 = LED(pin4)   # BCM 12, pin 32 — rezerva
+        self.led5 = LED(pin5)   # BCM 13, pin 33 — rezerva
+        self._all = [self.led1, self.led2, self.led3, self.led4, self.led5]
 
     def all_off(self):
-        self.led1.off()
-        self.led2.off()
-        self.led3.off()
+        for led in self._all:
+            led.off()
 
     def all_on(self):
-        self.led1.on()
-        self.led2.on()
-        self.led3.on()
+        for led in self._all:
+            led.on()
+
+    def all_flash(self, count: int = 3):
+        for led in self._all:
+            led.flash(count)
 
     def cleanup(self):
-        self.led1.cleanup()
-        self.led2.cleanup()
-        self.led3.cleanup()
+        for led in self._all:
+            led.cleanup()
 
 
 # ── Samostatný test ──────────────────────────────────────────────────────────
@@ -191,14 +202,14 @@ class LEDs:
 if __name__ == "__main__":
     import sys
 
-    print(f"LED test — LED1=BCM{PIN_LED1}(pin40) | LED2=BCM{PIN_LED2}(pin31) | LED3=BCM{PIN_LED3}(pin29)")
+    print(f"LED test — LED1=BCM{PIN_LED1}(p40) | LED2=BCM{PIN_LED2}(p31) | LED3=BCM{PIN_LED3}(p29) | LED4=BCM{PIN_LED4}(p32) | LED5=BCM{PIN_LED5}(p33)")
 
     leds = LEDs()
 
     mode = sys.argv[1] if len(sys.argv) > 1 else "ring"
     target = sys.argv[2] if len(sys.argv) > 2 else "1"   # 1 / 2 / 3 / all
 
-    led_map = {"1": leds.led1, "2": leds.led2, "3": leds.led3}
+    led_map = {"1": leds.led1, "2": leds.led2, "3": leds.led3, "4": leds.led4, "5": leds.led5}
     selected = led_map.get(target, leds.led1) if target != "all" else None
 
     try:
@@ -207,7 +218,7 @@ if __name__ == "__main__":
             if selected:
                 selected.sms_flash()
             else:
-                leds.led1.sms_flash(); leds.led2.sms_flash(); leds.led3.sms_flash()
+                leds.all_flash(3)
             time.sleep(2)
         elif mode == "on":
             print(f"Trvale ON — LED{target}. Ctrl+C pro ukončení.")
@@ -222,7 +233,8 @@ if __name__ == "__main__":
             if selected:
                 selected.blink(mode)
             else:
-                leds.led1.blink(mode); leds.led2.blink(mode); leds.led3.blink(mode)
+                for l in leds._all:
+                    l.blink(mode)
             while True:
                 time.sleep(0.5)
         else:
