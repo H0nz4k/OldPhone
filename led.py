@@ -6,8 +6,8 @@ Zapojení (každá LED přes rezistor ~220 Ω na GND):
   BCM 21  (pin 40) → LED1  — hlavní (hovory)
   BCM  6  (pin 31) → LED2  — rezerva
   BCM  5  (pin 29) → LED3  — rezerva
-  BCM 12  (pin 32) → LED4  — rezerva
-  BCM 13  (pin 33) → LED5  — rezerva
+  BCM 12  (pin 32) → LED4  — modrá
+  BCM 13  (pin 33) → LED5  — žlutá
   GND     (pin 34) → společná katoda všech LED
 
 Vzory blikání:
@@ -176,8 +176,8 @@ class LEDs:
         self.led1 = LED(pin1)   # BCM 21, pin 40 — hlavní
         self.led2 = LED(pin2)   # BCM  6, pin 31 — rezerva
         self.led3 = LED(pin3)   # BCM  5, pin 29 — rezerva
-        self.led4 = LED(pin4)   # BCM 12, pin 32 — rezerva
-        self.led5 = LED(pin5)   # BCM 13, pin 33 — rezerva
+        self.led4 = LED(pin4)   # BCM 12, pin 32 — modrá
+        self.led5 = LED(pin5)   # BCM 13, pin 33 — žlutá
         self._all = [self.led1, self.led2, self.led3, self.led4, self.led5]
 
     def all_off(self):

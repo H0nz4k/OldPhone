@@ -49,8 +49,8 @@ def test_led(leds: LEDs):
         (leds.led1, "LED1", "ČERVENÁ",  RED),
         (leds.led2, "LED2", "ZELENÁ",   GREEN),
         (leds.led3, "LED3", "ŽLUTÁ",    YELLOW),
-        (leds.led4, "LED4", "ŽLUTÁ",    YELLOW),
-        (leds.led5, "LED5", "MODRÁ",    BLUE),
+        (leds.led4, "LED4", "MODRÁ",    BLUE),
+        (leds.led5, "LED5", "ŽLUTÁ",   YELLOW),
     ]
 
     # 1. Každá zvlášť — trvale ON
