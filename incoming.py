@@ -18,6 +18,7 @@ import time
 import threading
 from gsm import GSM, load_config
 from led import LED
+from buttons import Buttons
 
 
 class IncomingCallListener:
@@ -25,6 +26,10 @@ class IncomingCallListener:
         self.cfg = load_config()
         self.gsm = GSM()
         self.led = LED()
+        self.buttons = Buttons()
+        self.buttons.on_hook_press    = self._hook_button_pressed
+        self.buttons.on_button2_press = self._button2_pressed
+        self._call_active = False
         self.gsm.enable_clip()
         self.gsm._send("AT+CMGF=1")          # textový režim SMS
         self.gsm._send('AT+CSCS="IRA"')      # ASCII charset — čitelný header
@@ -91,6 +96,33 @@ class IncomingCallListener:
         if found:
             print("----------------------------------\n")
 
+    # ── Obsluha tlačítek (GPIO interrupt → callback) ─────────────────────────
+
+    def _hook_button_pressed(self):
+        """HOOK tlačítko: zvedne nebo položí sluchátko."""
+        if self.ringing:
+            # zvonění → přijmout hovor
+            print("\n[HOOK] Přijímám hovor...")
+            self.gsm.answer()
+            self.ringing = False
+            self._call_active = True
+            self.led.blink("call_active")
+            print("Hovor přijat. Stiskni HOOK pro zavěšení.")
+        elif self._call_active:
+            # aktivní hovor → zavěsit
+            print("\n[HOOK] Zavěšuji...")
+            self.gsm.hangup()
+            self._call_active = False
+            self.led.off()
+            print("\nNaslouchám... (Ctrl+C pro ukončení)")
+        else:
+            # klid → ignoruj (nebo budoucí použití)
+            pass
+
+    def _button2_pressed(self):
+        """Tlačítko 2 — rezerva pro budoucí použití."""
+        print("\n[BTN2] Tlačítko 2 stisknuto (zatím bez akce).")
+
     # ── Čtecí smyčka ────────────────────────────────────────────────────────
 
     def _read_loop(self):
@@ -142,10 +174,11 @@ class IncomingCallListener:
                 pass
 
         elif line in ("NO CARRIER", "BUSY", "NO ANSWER"):
-            if self.ringing:
+            if self.ringing or self._call_active:
                 self.led.off()
                 print(f"\nVolající zavěsil ({line}).")
                 self.ringing = False
+                self._call_active = False
                 self.caller_number = "neznámé"
                 print("\nNaslouchám... (Ctrl+C pro ukončení)")
 
@@ -175,10 +208,12 @@ class IncomingCallListener:
                 print("Přijímám hovor...")
                 self.gsm.answer()
                 self.ringing = False
+                self._call_active = True
                 self.led.blink("call_active")
-                print("Hovor přijat. Stiskni Enter pro zavěšení.")
+                print("Hovor přijat. Stiskni Enter nebo HOOK tlačítko pro zavěšení.")
                 input()
                 self.gsm.hangup()
+                self._call_active = False
                 self.led.off()
                 self.caller_number = "neznámé"
                 print("\nNaslouchám... (Ctrl+C pro ukončení)")
@@ -187,6 +222,7 @@ class IncomingCallListener:
                 print("Odmítám hovor...")
                 self.gsm.hangup()
                 self.ringing = False
+                self._call_active = False
                 self.led.off()
                 self.caller_number = "neznámé"
                 print("\nNaslouchám... (Ctrl+C pro ukončení)")
@@ -222,8 +258,9 @@ class IncomingCallListener:
             print("\nUkončuji...")
         finally:
             self.running = False
-            if self.ringing:
+            if self.ringing or self._call_active:
                 self.gsm.hangup()
+            self.buttons.cleanup()
             self.led.cleanup()
             self.gsm.close()
 
