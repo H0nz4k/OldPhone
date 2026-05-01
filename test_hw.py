@@ -3,18 +3,25 @@
 Hardwarový test — LED, tlačítka, ciferník.
 
 Spuštění:
-  python3 test_hw.py          # kompletní průvodce
-  python3 test_hw.py led      # jen LED
-  python3 test_hw.py buttons  # jen tlačítka
-  python3 test_hw.py dial     # jen ciferník
+  python3 test_hw.py            # kompletní průvodce
+  python3 test_hw.py led        # jen LED
+  python3 test_hw.py buttons    # jen tlačítka (interrupt)
+  python3 test_hw.py btnpoll    # tlačítka — přímé čtení pinu (diagnostika)
+  python3 test_hw.py dial       # jen ciferník
 """
 
 import sys
 import time
 import threading
 
+try:
+    import RPi.GPIO as GPIO
+    _GPIO_OK = True
+except ImportError:
+    _GPIO_OK = False
+
 from led import LEDs
-from buttons import Buttons
+from buttons import Buttons, PIN_HOOK, PIN_BUTTON2
 from cifernik import Cifernik
 
 # ── Barvy pro terminál ───────────────────────────────────────────────────────
@@ -84,6 +91,47 @@ def test_led(leds: LEDs):
     leds.all_off()
 
     ok("LED test dokončen.\n")
+
+# ── Tlačítka — polling diagnostika ──────────────────────────────────────────
+
+def test_buttons_poll():
+    """
+    Přímé čtení GPIO pinu každých 50 ms — bez interruptů.
+    Pomáhá odhalit jestli je problém v zapojení nebo v interrupt kódu.
+    """
+    header("TEST TLAČÍTEK — POLLING (diagnostika)")
+
+    if not _GPIO_OK:
+        print("  GPIO není dostupné.")
+        return
+
+    GPIO.setmode(GPIO.BCM)
+    GPIO.setup(PIN_HOOK,    GPIO.IN, pull_up_down=GPIO.PUD_UP)
+    GPIO.setup(PIN_BUTTON2, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+
+    info(f"BTN1 HOOK  = BCM {PIN_HOOK}  (pin 36)  | pull-up → stisknuté = LOW (0)")
+    info(f"BTN2 rezerv= BCM {PIN_BUTTON2} (pin 35) | pull-up → stisknuté = LOW (0)")
+    info("Mačkej tlačítka. Ctrl+C pro ukončení.\n")
+
+    prev = {PIN_HOOK: 1, PIN_BUTTON2: 1}
+    try:
+        while True:
+            for pin, name in [(PIN_HOOK, "BTN1 HOOK"), (PIN_BUTTON2, "BTN2 rezerva")]:
+                val = GPIO.input(pin)
+                if val != prev[pin]:
+                    if val == 0:
+                        print(f"  {GREEN}▼ {name} STISKNUTO  (pin={pin}, value={val}){RESET}")
+                    else:
+                        print(f"  {YELLOW}▲ {name} uvolněno   (pin={pin}, value={val}){RESET}")
+                    prev[pin] = val
+            time.sleep(0.05)
+    except KeyboardInterrupt:
+        print()
+    finally:
+        GPIO.cleanup([PIN_HOOK, PIN_BUTTON2])
+
+    ok("Polling test dokončen.\n")
+
 
 # ── Tlačítka test ────────────────────────────────────────────────────────────
 
@@ -170,7 +218,9 @@ def main():
             if mode == "all":
                 wait()
 
-        if mode in ("all", "buttons"):
+        if mode == "btnpoll":
+            test_buttons_poll()
+        elif mode in ("all", "buttons"):
             test_buttons(leds)
             if mode == "all":
                 wait()
