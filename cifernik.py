@@ -64,29 +64,33 @@ class Cifernik:
         # Krátká pauza — necháme kontakty ustálit po START
         time.sleep(0.020)
 
-        # Počítáme pulzy měřením délky každého pulzu.
-        # Pravý pulz ciferníku: LOW ~30-50 ms (při 10 pps)
-        # Zákmit (bounce):      LOW < 5 ms → ignorujeme
-        MIN_PULSE_MS = 0.012   # minimální délka platného pulzu
+        # Počítáme pulzy: detekujeme falling + rising edge a měříme délku LOW.
+        # Pravý pulz: LOW ~30-50 ms | Zákmit: LOW < 10 ms → ignoruj
+        MIN_PULSE_S = 0.010   # 10 ms minimum
 
         pulse_count = 0
         last_state = GPIO.input(self.pin_pulse)
+        fall_time = None
 
         while GPIO.input(self.pin_start) == 0:
             state = GPIO.input(self.pin_pulse)
 
             if last_state == 1 and state == 0:
-                # Falling edge — čekáme jak dlouho zůstane LOW
+                # Falling edge — zaznamenáme čas
                 fall_time = time.time()
-                while GPIO.input(self.pin_pulse) == 0:
-                    time.sleep(0.001)
-                pulse_duration = time.time() - fall_time
-                if pulse_duration >= MIN_PULSE_MS:
-                    pulse_count += 1
-                last_state = 1   # pin je teď HIGH
-            else:
-                last_state = state
-                time.sleep(0.001)
+
+            elif last_state == 0 and state == 1:
+                # Rising edge — změříme délku pulzu
+                if fall_time is not None:
+                    duration = time.time() - fall_time
+                    if duration >= MIN_PULSE_S:
+                        pulse_count += 1
+                    # debug — odkomentuj pokud chceš vidět délky pulzů:
+                    # print(f"    [pulse {duration*1000:.1f} ms → {'OK' if duration >= MIN_PULSE_S else 'skip'}]")
+                fall_time = None
+
+            last_state = state
+            time.sleep(0.001)
 
         # Krátká pauza po ukončení — necháme kontakty ustálit
         time.sleep(0.050)
