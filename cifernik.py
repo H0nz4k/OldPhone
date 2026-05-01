@@ -106,7 +106,7 @@ class Cifernik:
 
     def cleanup(self):
         if GPIO_OK:
-            GPIO.cleanup()
+            GPIO.cleanup([self.pin_pulse, self.pin_start])
 
 
 # ── Testovací smyčka ─────────────────────────────────────────────────────────
