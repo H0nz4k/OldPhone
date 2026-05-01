@@ -61,29 +61,32 @@ class Cifernik:
                 return None
             time.sleep(0.005)
 
-        # Použijeme GPIO interrupt místo pollingu — spolehlivé na Linuxu.
-        # bouncetime=30ms: skutečné pulzy jsou ~100ms od sebe → bezpečně projdou,
-        # zákmity (<5ms) se ignorují.
-        import threading
-        pulse_count = 0
-        _lock = threading.Lock()
+        # Tight loop bez sleep — maximální polling rate (nejbližší Picu).
+        # Debounce přes timestamp: skutečné pulzy ~100ms od sebe,
+        # zákmity <5ms → ignoruj pokud < DEBOUNCE od posledního pulzu.
+        DEBOUNCE = 0.030   # 30 ms
 
-        def _on_pulse(channel):
-            nonlocal pulse_count
-            with _lock:
+        pulse_count = 0
+        last_state = GPIO.input(self.pin_pulse)
+        last_fall = 0.0
+
+        while GPIO.input(self.pin_start) == 0:
+            state = GPIO.input(self.pin_pulse)
+            if last_state == 1 and state == 0:   # falling edge
+                now = time.time()
+                if now - last_fall >= DEBOUNCE:
+                    pulse_count += 1
+                    last_fall = now
+            last_state = state
+            # žádný sleep — tight loop
+
+        # Poslední pulz mohl být přerušen START→HIGH
+        if last_state == 0:
+            now = time.time()
+            if now - last_fall >= DEBOUNCE:
                 pulse_count += 1
 
-        GPIO.add_event_detect(self.pin_pulse, GPIO.FALLING,
-                              callback=_on_pulse, bouncetime=30)
-
-        # Čekáme dokud se číselník točí (START == LOW)
-        while GPIO.input(self.pin_start) == 0:
-            time.sleep(0.002)
-
-        # Krátká pauza — posledni pulz se může ještě zpracovávat
-        time.sleep(0.080)
-
-        GPIO.remove_event_detect(self.pin_pulse)
+        time.sleep(0.050)
 
         # Vyhodnocení: 10 pulzů = 0, jinak hodnota = počet pulzů
         if pulse_count >= 10:
