@@ -4,8 +4,8 @@ LED indikátory — 3 nezávislé LED diody.
 
 Zapojení (každá LED přes rezistor ~220 Ω na GND):
   BCM 21  (pin 40) → LED1  — hlavní (hovory)
-  BCM 13  (pin 33) → LED2  — rezerva
-  BCM 12  (pin 32) → LED3  — rezerva
+  BCM  6  (pin 31) → LED2  — rezerva
+  BCM  5  (pin 29) → LED3  — rezerva
   GND     (pin 39) → společná katoda všech LED
 
 Vzory blikání:
@@ -38,8 +38,8 @@ except ImportError:
 
 # ── Výchozí piny ────────────────────────────────────────────────────────────
 PIN_LED1 = 21   # pin 40 — hlavní (hovory)
-PIN_LED2 = 13   # pin 33 — rezerva
-PIN_LED3 = 12   # pin 32 — rezerva
+PIN_LED2 =  6   # pin 31 — rezerva
+PIN_LED3 =  5   # pin 29 — rezerva
 
 _gpio_initialized = False
 
@@ -167,8 +167,8 @@ class LEDs:
                  pin2: int = PIN_LED2,
                  pin3: int = PIN_LED3):
         self.led1 = LED(pin1)   # BCM 21, pin 40 — hlavní
-        self.led2 = LED(pin2)   # BCM 13, pin 33 — rezerva
-        self.led3 = LED(pin3)   # BCM 12, pin 32 — rezerva
+        self.led2 = LED(pin2)   # BCM  6, pin 31 — rezerva
+        self.led3 = LED(pin3)   # BCM  5, pin 29 — rezerva
 
     def all_off(self):
         self.led1.off()
@@ -191,7 +191,7 @@ class LEDs:
 if __name__ == "__main__":
     import sys
 
-    print(f"LED test — LED1=BCM{PIN_LED1}(pin40) | LED2=BCM{PIN_LED2}(pin33) | LED3=BCM{PIN_LED3}(pin32)")
+    print(f"LED test — LED1=BCM{PIN_LED1}(pin40) | LED2=BCM{PIN_LED2}(pin31) | LED3=BCM{PIN_LED3}(pin29)")
 
     leds = LEDs()
 
