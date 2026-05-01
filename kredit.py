@@ -69,9 +69,9 @@ def main():
             gsm.close()
             return
 
-    # Pošleme SMS s dotazem
-    print("Odesílám SMS na 4603...")
-    resp = gsm.send_sms("4603", "KREDIT")
+    # Pošleme SMS s dotazem — T-Mobile CZ vyžaduje "KREDIT S"
+    print("Odesílám SMS 'KREDIT S' na 4603...")
+    resp = gsm.send_sms("4603", "KREDIT S")
     if "+CMGS" in resp or resp.strip():
         print("SMS odeslána. Čekám na odpověď T-Mobile (max 90 s)...\n")
     else:
