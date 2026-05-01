@@ -94,15 +94,13 @@ class Cifernik:
 
         # ── Zachytit poslední pulz ───────────────────────────────────────────
         # START šel HIGH, ale PULSE může být stále LOW (poslední pulz ještě běží).
-        # Počkáme až PULSE dokončí a pulz započítáme.
+        # Platný pulz: fall_time byl nastaven >= MIN_PULSE_S před koncem smyčky.
+        # Pokud je fall_time čerstvý (< MIN_PULSE_S), jde o bounce při vracení číselníku.
         if fall_time is not None:
-            deadline2 = time.time() + 0.150   # max 150 ms čekání
-            while GPIO.input(self.pin_pulse) == 0 and time.time() < deadline2:
-                time.sleep(0.001)
-            duration = time.time() - fall_time
-            if duration >= MIN_PULSE_S:
+            elapsed = time.time() - fall_time
+            if elapsed >= MIN_PULSE_S:
                 pulse_count += 1
-            # print(f"    [last pulse {duration*1000:.1f} ms → {'OK' if duration >= MIN_PULSE_S else 'skip'}]")
+            # print(f"    [last pulse elapsed={elapsed*1000:.1f}ms → {'OK' if elapsed >= MIN_PULSE_S else 'skip/bounce'}]")
 
         # Krátká pauza po ukončení — necháme kontakty ustálit
         time.sleep(0.050)
