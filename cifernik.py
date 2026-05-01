@@ -80,12 +80,6 @@ class Cifernik:
             last_state = state
             # žádný sleep — tight loop
 
-        # Poslední pulz mohl být přerušen START→HIGH
-        if last_state == 0:
-            now = time.time()
-            if now - last_fall >= DEBOUNCE:
-                pulse_count += 1
-
         time.sleep(0.050)
 
         # Vyhodnocení: 10 pulzů = 0, jinak hodnota = počet pulzů
