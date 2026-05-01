@@ -61,19 +61,31 @@ class Cifernik:
                 return None
             time.sleep(0.005)
 
-        # Počítáme pulzy (falling edge na PULSE)
+        # Krátká pauza — necháme kontakty ustálit (potlačení bounce na začátku)
+        time.sleep(0.015)
+
+        # Počítáme pulzy s debounce filtrem
+        # Skutečný pulz ciferníku trvá ~50-100 ms → min. mezera 30 ms
+        DEBOUNCE = 0.030
+
         pulse_count = 0
         last_state = GPIO.input(self.pin_pulse)
+        last_pulse_time = 0.0
 
         while GPIO.input(self.pin_start) == 0:
             state = GPIO.input(self.pin_pulse)
+            now = time.time()
             if last_state == 1 and state == 0:   # falling edge
-                pulse_count += 1
+                if now - last_pulse_time >= DEBOUNCE:
+                    pulse_count += 1
+                    last_pulse_time = now
             last_state = state
-            time.sleep(0.0003)   # 300 µs — stejné jako Pico
+            time.sleep(0.001)   # 1 ms polling — dostatečně rychlé pro RPi
+
+        # Krátká pauza po ukončení — necháme kontakty ustálit
+        time.sleep(0.05)
 
         # Vyhodnocení: 10 pulzů = 0, jinak hodnota = počet pulzů
-        time.sleep(0.1)
         if pulse_count >= 10:
             return 0
         return pulse_count if pulse_count > 0 else None
