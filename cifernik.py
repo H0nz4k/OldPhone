@@ -61,48 +61,24 @@ class Cifernik:
                 return None
             time.sleep(0.005)
 
-        # Krátká pauza — necháme kontakty ustálit po START
-        time.sleep(0.020)
-
-        # Počítáme pulzy: detekujeme falling + rising edge a měříme délku LOW.
-        # Pravý pulz: LOW ~30-50 ms | Zákmit: LOW < 10 ms → ignoruj
-        MIN_PULSE_S = 0.010   # 10 ms minimum
-
+        # Stejná logika jako Pico — jen counting falling edges, polling 1 ms
         pulse_count = 0
         last_state = GPIO.input(self.pin_pulse)
-        fall_time = None
 
         while GPIO.input(self.pin_start) == 0:
             state = GPIO.input(self.pin_pulse)
-
-            if last_state == 1 and state == 0:
-                # Falling edge — zaznamenáme čas
-                fall_time = time.time()
-
-            elif last_state == 0 and state == 1:
-                # Rising edge — změříme délku pulzu
-                if fall_time is not None:
-                    duration = time.time() - fall_time
-                    if duration >= MIN_PULSE_S:
-                        pulse_count += 1
-                    # debug — odkomentuj pro ladění:
-                    # print(f"    [pulse {duration*1000:.1f} ms → {'OK' if duration >= MIN_PULSE_S else 'skip'}]")
-                fall_time = None
-
+            if last_state == 1 and state == 0:   # falling edge
+                pulse_count += 1
             last_state = state
-            time.sleep(0.001)
+            time.sleep(0.001)   # 1 ms (Pico měl 300 µs, ale 1 ms stačí pro 10 pps)
 
         # ── Zachytit poslední pulz ───────────────────────────────────────────
-        # START šel HIGH, ale PULSE může být stále LOW (poslední pulz ještě běží).
-        # Platný pulz: fall_time byl nastaven >= MIN_PULSE_S před koncem smyčky.
-        # Pokud je fall_time čerstvý (< MIN_PULSE_S), jde o bounce při vracení číselníku.
-        if fall_time is not None:
-            elapsed = time.time() - fall_time
-            if elapsed >= MIN_PULSE_S:
-                pulse_count += 1
-            # print(f"    [last pulse elapsed={elapsed*1000:.1f}ms → {'OK' if elapsed >= MIN_PULSE_S else 'skip/bounce'}]")
+        # Na RPi může START jít HIGH zatímco PULSE je stále LOW (pulz ještě běží).
+        # Pokud last_state == 0, falling edge byl detekován ale pulz nebyl dokončen.
+        if last_state == 0:
+            pulse_count += 1
 
-        # Krátká pauza po ukončení — necháme kontakty ustálit
+        # Krátká pauza po ukončení
         time.sleep(0.050)
 
         # Vyhodnocení: 10 pulzů = 0, jinak hodnota = počet pulzů
